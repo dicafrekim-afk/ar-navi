@@ -214,7 +214,7 @@ export default function HomePanel({ position, navigationData }) {
             />
           </mesh>
 
-          {/* 병원명 */}
+          {/* 목적지명 */}
           <Text
             position={[-0.82, 0.01, 0.02]}
             fontSize={0.115}
@@ -222,7 +222,7 @@ export default function HomePanel({ position, navigationData }) {
             anchorX="left"
             anchorY="middle"
           >
-            제일연합내과의원
+            {navigationData?.destination?.name ?? '목적지'}
           </Text>
 
           {/* 거리 / 도착 표시 */}

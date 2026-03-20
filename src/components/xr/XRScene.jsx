@@ -92,6 +92,7 @@ function SceneContent({
           distance={navigationData.distance}
           heading={navigationData.heading}
           hasArrived={navigationData.hasArrived}
+          destinationName={navigationData.destination?.name}
         />
       )}
 

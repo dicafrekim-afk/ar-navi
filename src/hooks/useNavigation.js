@@ -190,6 +190,13 @@ export function useNavigation(destination = DEFAULT_DESTINATION) {
     }
   }, [recompute])
 
+  // 목적지 변경 시 즉시 재계산 (watchPosition 콜백은 stale closure라 별도 처리)
+  useEffect(() => {
+    if (smoothPosRef.current) {
+      recompute(smoothPosRef.current, smoothHeadingRef.current)
+    }
+  }, [destination, recompute])
+
   // 언마운트 시 정리
   useEffect(() => {
     return () => {

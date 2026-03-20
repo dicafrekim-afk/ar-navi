@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 
-// ─── 목적지 상수 ──────────────────────────────────────────────────────────────
-const DESTINATION = {
+// ─── 기본 목적지 ──────────────────────────────────────────────────────────────
+const DEFAULT_DESTINATION = {
   lat:  36.4868361,
   lon:  127.2509414,
   name: '제일연합내과의원',
@@ -62,7 +62,7 @@ function smoothAngle(current, next, alpha) {
  *   destination    { lat, lon, name }
  *   startNavigation() → void  (button click 핸들러로 사용)
  */
-export function useNavigation() {
+export function useNavigation(destination = DEFAULT_DESTINATION) {
   const [state, setState] = useState({
     status:        'idle',
     position:      null,
@@ -82,8 +82,8 @@ export function useNavigation() {
   // 파생값 재계산 (GPS·나침반이 업데이트될 때마다 호출)
   const recompute = useCallback((pos, heading) => {
     if (!pos) return
-    const dist    = haversine(pos.lat, pos.lon, DESTINATION.lat, DESTINATION.lon)
-    const bear    = initialBearing(pos.lat, pos.lon, DESTINATION.lat, DESTINATION.lon)
+    const dist    = haversine(pos.lat, pos.lon, destination.lat, destination.lon)
+    const bear    = initialBearing(pos.lat, pos.lon, destination.lat, destination.lon)
     const relAngle = heading !== null ? (bear - heading + 360) % 360 : null
 
     setState((prev) => ({
@@ -95,7 +95,7 @@ export function useNavigation() {
       relativeAngle: relAngle,
       hasArrived:    dist < ARRIVAL_KM,
     }))
-  }, [])
+  }, [destination])
 
   const startNavigation = useCallback(async () => {
     // 이미 실행 중이면 무시
@@ -200,5 +200,5 @@ export function useNavigation() {
     }
   }, [])
 
-  return { ...state, destination: DESTINATION, startNavigation }
+  return { ...state, destination, startNavigation }
 }

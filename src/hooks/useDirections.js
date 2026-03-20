@@ -1,8 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 
-// ─── 목적지 (useNavigation과 동일) ────────────────────────────────────────────
-const DESTINATION = { lat: 36.4868361, lon: 127.2509414 }
-
 const REFETCH_INTERVAL_MS = 30_000  // 30초마다 경로 재조회
 const STEP_ADVANCE_M      = 15      // 스텝 끝지점 15m 이내 → 다음 스텝으로
 
@@ -32,7 +29,7 @@ function haversineMeters(lat1, lon1, lat2, lon2) {
  *   currentStep      step | null
  *   distanceToStep   meters | null
  */
-export function useDirections({ position, active, apiKey }) {
+export function useDirections({ position, active, apiKey, destination }) {
   const [steps,            setSteps]            = useState([])
   const [loading,          setLoading]          = useState(false)
   const [error,            setError]            = useState(null)
@@ -43,7 +40,7 @@ export function useDirections({ position, active, apiKey }) {
 
   // ── 경로 조회 함수 ──────────────────────────────────────────────────────────
   const fetchDirections = useCallback(async (pos) => {
-    if (!apiKey || !pos) return
+    if (!apiKey || !pos || !destination) return
     setLoading(true)
     try {
       const res = await fetch(
@@ -65,7 +62,7 @@ export function useDirections({ position, active, apiKey }) {
             },
             destination: {
               location: {
-                latLng: { latitude: DESTINATION.lat, longitude: DESTINATION.lon },
+                latLng: { latitude: destination.lat, longitude: destination.lon },
               },
             },
             travelMode:   'WALK',
@@ -103,7 +100,7 @@ export function useDirections({ position, active, apiKey }) {
     } finally {
       setLoading(false)
     }
-  }, [apiKey])
+  }, [apiKey, destination])
 
   // ── 활성화 시 초기 조회 + 30초 재조회 ────────────────────────────────────
   useEffect(() => {

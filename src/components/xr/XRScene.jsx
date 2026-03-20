@@ -11,8 +11,15 @@ import HitTestReticle from './HitTestReticle'
 import NavigationArrow from '../ar/NavigationArrow'
 import FloorArrows from '../ar/FloorArrows'
 import NavigationGuide from '../ui/NavigationGuide'
+import DestinationInput from '../ui/DestinationInput'
 import { useNavigation } from '../../hooks/useNavigation'
 import { useDirections } from '../../hooks/useDirections'
+
+const DEFAULT_DESTINATION = {
+  lat:  36.4868361,
+  lon:  127.2509414,
+  name: '제일연합내과의원',
+}
 
 // ─── XR 스토어 ────────────────────────────────────────────────────────────────
 const xrStore = createXRStore({
@@ -119,9 +126,10 @@ const btnBase = {
 export default function XRScene() {
   const [placedPosition, setPlacedPosition] = useState(new Vector3(0, 1, -3))
   const [activeZone,     setActiveZone]     = useState(null)
+  const [destination,    setDestination]    = useState(DEFAULT_DESTINATION)
 
   // 내비게이션 훅 — Canvas 밖에서 호출 (브라우저 API 사용)
-  const navigationData = useNavigation()
+  const navigationData = useNavigation(destination)
   const { status, error, startNavigation, hasArrived, position, heading } = navigationData
 
   const navActive = status === 'active'
@@ -129,12 +137,20 @@ export default function XRScene() {
   // Google Directions 훅 — 실제 보행 경로 조회
   const directionsData = useDirections({
     position,
-    active:  navActive,
-    apiKey:  import.meta.env.VITE_GOOGLE_MAPS_API_KEY,
+    active:      navActive,
+    apiKey:      import.meta.env.VITE_GOOGLE_MAPS_API_KEY,
+    destination,
   })
 
   return (
     <>
+      {/* ── 목적지 검색 입력창 ───────────────────────── */}
+      <DestinationInput
+        destination={destination}
+        onConfirm={setDestination}
+        disabled={navActive}
+      />
+
       {/* ── AR 진입 버튼 ─────────────────────────────── */}
       <button
         onClick={() => xrStore.enterAR()}

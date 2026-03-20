@@ -9,7 +9,10 @@ import NotificationPanel from '../ui/NotificationPanel'
 import TaskPanel from '../ui/TaskPanel'
 import HitTestReticle from './HitTestReticle'
 import NavigationArrow from '../ar/NavigationArrow'
+import FloorArrows from '../ar/FloorArrows'
+import NavigationGuide from '../ui/NavigationGuide'
 import { useNavigation } from '../../hooks/useNavigation'
+import { useDirections } from '../../hooks/useDirections'
 
 // ─── XR 스토어 ────────────────────────────────────────────────────────────────
 const xrStore = createXRStore({
@@ -27,8 +30,10 @@ function SceneContent({
   activeZone,
   setActiveZone,
   navigationData,
+  directionsData,
 }) {
   const navActive = navigationData.status === 'active'
+  const floorY    = placedPosition ? placedPosition.y : undefined
 
   return (
     <>
@@ -65,12 +70,15 @@ function SceneContent({
             <TaskPanel position={placedPosition} accentColor="#95E1D3" />
           )}
           {!activeZone && (
-            <HomePanel position={placedPosition} navigationData={navigationData} />
+            <HomePanel
+              position={placedPosition}
+              navigationData={navigationData}
+            />
           )}
         </>
       )}
 
-      {/* AR 내비게이션 화살표 HUD — 내비게이션 활성 시에만 표시 */}
+      {/* AR 내비게이션 HUD 화살표 */}
       {navActive && (
         <NavigationArrow
           relativeAngle={navigationData.relativeAngle}
@@ -79,33 +87,51 @@ function SceneContent({
           hasArrived={navigationData.hasArrived}
         />
       )}
+
+      {/* 바닥 파란색 화살표 경로 가이드 */}
+      <FloorArrows
+        steps={directionsData.steps}
+        currentPosition={navigationData.position}
+        heading={navigationData.heading}
+        active={navActive && !navigationData.hasArrived}
+        floorY={floorY}
+      />
     </>
   )
 }
 
 // ─── 버튼 공통 스타일 ──────────────────────────────────────────────────────────
 const btnBase = {
-  position: 'fixed',
-  zIndex: 999,
-  padding: '12px 22px',
-  fontSize: '15px',
-  fontWeight: 'bold',
-  color: 'white',
-  border: 'none',
+  position:     'fixed',
+  zIndex:       999,
+  padding:      '12px 22px',
+  fontSize:     '15px',
+  fontWeight:   'bold',
+  color:        'white',
+  border:       'none',
   borderRadius: '8px',
-  cursor: 'pointer',
-  boxShadow: '0 4px 12px rgba(0,0,0,0.35)',
-  transition: 'opacity 0.2s',
+  cursor:       'pointer',
+  boxShadow:    '0 4px 12px rgba(0,0,0,0.35)',
+  transition:   'opacity 0.2s',
 }
 
 // ─── 메인 컴포넌트 ────────────────────────────────────────────────────────────
 export default function XRScene() {
   const [placedPosition, setPlacedPosition] = useState(new Vector3(0, 1, -3))
-  const [activeZone, setActiveZone]         = useState(null)
+  const [activeZone,     setActiveZone]     = useState(null)
 
   // 내비게이션 훅 — Canvas 밖에서 호출 (브라우저 API 사용)
   const navigationData = useNavigation()
-  const { status, error, startNavigation, hasArrived } = navigationData
+  const { status, error, startNavigation, hasArrived, position, heading } = navigationData
+
+  const navActive = status === 'active'
+
+  // Google Directions 훅 — 실제 보행 경로 조회
+  const directionsData = useDirections({
+    position,
+    active:  navActive,
+    apiKey:  import.meta.env.VITE_GOOGLE_MAPS_API_KEY,
+  })
 
   return (
     <>
@@ -139,21 +165,20 @@ export default function XRScene() {
         </div>
       )}
 
-      {/* ── 내비게이션 활성 상태 인디케이터 ─────────────── */}
-      {status === 'active' && !hasArrived && (
-        <div style={{
-          position: 'fixed', bottom: '20px', left: '20px', zIndex: 999,
-          padding: '10px 18px', borderRadius: '8px',
-          backgroundColor: 'rgba(0,119,204,0.85)', color: '#ffffff',
-          fontSize: '13px', lineHeight: '1.5',
-        }}>
-          🧭 내비게이션 중<br />
-          <span style={{ fontSize: '11px', opacity: 0.8 }}>제일연합내과의원</span>
-        </div>
+      {/* ── 하단 턴-바이-턴 안내 가이드 ─────────────────
+           내비게이션 활성 & 미도착 시 표시 */}
+      {navActive && !hasArrived && (
+        <NavigationGuide
+          currentStep={directionsData.currentStep}
+          distanceToStep={directionsData.distanceToStep}
+          hasArrived={hasArrived}
+          destName={navigationData.destination.name}
+          loading={directionsData.loading}
+          error={directionsData.error}
+        />
       )}
 
-      {/* ── 도착 알림 (HTML 오버레이 버전) ───────────────
-           3D 팝업과 함께 HTML 배너도 표시 */}
+      {/* ── 도착 알림 배너 ────────────────────────────── */}
       {hasArrived && (
         <div style={{
           position: 'fixed', top: '24px', left: '50%', transform: 'translateX(-50%)',
@@ -163,7 +188,9 @@ export default function XRScene() {
           boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
         }}>
           🏥 목적지에 도착했습니다!<br />
-          <span style={{ fontSize: '13px', fontWeight: 'normal' }}>제일연합내과의원</span>
+          <span style={{ fontSize: '13px', fontWeight: 'normal' }}>
+            {navigationData.destination.name}
+          </span>
         </div>
       )}
 
@@ -192,6 +219,7 @@ export default function XRScene() {
             activeZone={activeZone}
             setActiveZone={setActiveZone}
             navigationData={navigationData}
+            directionsData={directionsData}
           />
         </XR>
       </Canvas>

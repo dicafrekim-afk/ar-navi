@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { Text, RoundedBox } from '@react-three/drei'
 import DashboardPanel from './DashboardPanel'
 import CatProfileCard from './CatProfileCard'
@@ -72,9 +72,22 @@ export default function HomePanel({ position, navigationData }) {
   const selectedCat = CATS.find((c) => c.name === selectedCatName) ?? null
 
   const handleCatSelect = (name) => {
-    // 같은 고양이 재탭 시 카드 닫기
     setSelectedCatName((prev) => (prev === name ? null : name))
   }
+
+  // 도착 시 고양이 팝업 자동 트리거 (한 번만)
+  const arrivedShownRef = useRef(false)
+  useEffect(() => {
+    if (hasArrived && !arrivedShownRef.current) {
+      arrivedShownRef.current = true
+      // 랜덤 고양이 한 마리 선택
+      const randomCat = CATS[Math.floor(Math.random() * CATS.length)]
+      setSelectedCatName(randomCat.name)
+    }
+    if (!hasArrived) {
+      arrivedShownRef.current = false
+    }
+  }, [hasArrived])
 
   // 4마리 균등 배치: x = -1.08, -0.36, +0.36, +1.08
   const catSpacing = 0.72

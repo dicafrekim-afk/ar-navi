@@ -13,33 +13,26 @@ function useDebounce(value, delay) {
 }
 
 // ─── 컴포넌트 ─────────────────────────────────────────────────────────────────
-/**
- * DestinationInput — Places Autocomplete 검색 입력창
- *
- * props:
- *   destination  { lat, lon, name }
- *   onConfirm    (destination) => void
- *   disabled     boolean (내비게이션 활성 중)
- */
 export default function DestinationInput({ destination, onConfirm, disabled }) {
   const [open,        setOpen]        = useState(false)
   const [query,       setQuery]       = useState('')
   const [suggestions, setSuggestions] = useState([])
-  const [fetching,    setFetching]    = useState(false)  // 자동완성 로딩
-  const [selecting,   setSelecting]   = useState(false)  // 장소 선택 로딩
+  const [fetching,    setFetching]    = useState(false)
+  const [selecting,   setSelecting]   = useState(false)
   const [error,       setError]       = useState(null)
 
-  const inputRef    = useRef(null)
-  const debouncedQ  = useDebounce(query, 300)
+  const inputRef   = useRef(null)
+  const debouncedQ = useDebounce(query, 350)
 
-  // ── 자동완성 조회 (300ms 디바운스) ─────────────────────────────────────────
+  // ── 자동완성 조회 (legacy Places Autocomplete API) ─────────────────────────
   useEffect(() => {
     if (!open || !debouncedQ.trim()) {
       setSuggestions([])
+      setError(null)
       return
     }
     if (!API_KEY) {
-      setError('VITE_GOOGLE_MAPS_API_KEY가 설정되지 않았습니다.')
+      setError('.env.local 에 VITE_GOOGLE_MAPS_API_KEY 를 설정해주세요.')
       return
     }
 
@@ -47,24 +40,32 @@ export default function DestinationInput({ destination, onConfirm, disabled }) {
     setFetching(true)
     setError(null)
 
-    fetch('https://places.googleapis.com/v1/places:autocomplete', {
-      method:  'POST',
-      headers: {
-        'Content-Type':   'application/json',
-        'X-Goog-Api-Key': API_KEY,
-      },
-      body: JSON.stringify({
-        input:        debouncedQ,
-        languageCode: 'ko',
-        regionCode:   'KR',
-      }),
-    })
+    const url =
+      `https://maps.googleapis.com/maps/api/place/autocomplete/json` +
+      `?input=${encodeURIComponent(debouncedQ)}` +
+      `&language=ko&components=country:kr` +
+      `&key=${API_KEY}`
+
+    fetch(url)
       .then((r) => r.json())
       .then((data) => {
-        if (!cancelled) setSuggestions(data.suggestions ?? [])
+        if (cancelled) return
+
+        // API 자체 오류 상태 표시
+        if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') {
+          setError(
+            data.error_message
+              ? `오류: ${data.error_message}`
+              : `API 오류 (${data.status}) — Google Cloud Console에서 Places API 활성화를 확인하세요.`,
+          )
+          setSuggestions([])
+          return
+        }
+
+        setSuggestions(data.predictions ?? [])
       })
-      .catch(() => {
-        if (!cancelled) setError('자동완성 오류가 발생했습니다.')
+      .catch((e) => {
+        if (!cancelled) setError(`네트워크 오류: ${e.message}`)
       })
       .finally(() => {
         if (!cancelled) setFetching(false)
@@ -74,31 +75,35 @@ export default function DestinationInput({ destination, onConfirm, disabled }) {
   }, [debouncedQ, open])
 
   // ── 목록에서 선택 → Place Details로 좌표 취득 ──────────────────────────────
-  const handleSelect = async (suggestion) => {
-    const { placeId, text, structuredFormat } = suggestion.placePrediction
-    const displayName =
-      structuredFormat?.mainText?.text ?? text?.text ?? '알 수 없는 장소'
+  const handleSelect = async (prediction) => {
+    const { place_id, description, structured_formatting } = prediction
+    const displayName = structured_formatting?.main_text ?? description
 
     setSelecting(true)
     setError(null)
     try {
-      const res   = await fetch(
-        `https://places.googleapis.com/v1/places/${placeId}?fields=location,displayName&key=${API_KEY}`,
-      )
-      const place = await res.json()
+      const url =
+        `https://maps.googleapis.com/maps/api/place/details/json` +
+        `?place_id=${place_id}&fields=geometry,name&language=ko` +
+        `&key=${API_KEY}`
 
-      if (!place.location) throw new Error('좌표를 가져올 수 없습니다.')
+      const res  = await fetch(url)
+      const data = await res.json()
+
+      if (data.status !== 'OK') {
+        throw new Error(`장소 상세정보 오류 (${data.status})`)
+      }
 
       onConfirm({
-        lat:  place.location.latitude,
-        lon:  place.location.longitude,
-        name: place.displayName?.text ?? displayName,
+        lat:  data.result.geometry.location.lat,
+        lon:  data.result.geometry.location.lng,
+        name: data.result.name ?? displayName,
       })
       setQuery('')
       setSuggestions([])
       setOpen(false)
     } catch (e) {
-      setError(e.message ?? '장소 정보를 가져오지 못했습니다.')
+      setError(e.message)
     } finally {
       setSelecting(false)
     }
@@ -110,7 +115,6 @@ export default function DestinationInput({ destination, onConfirm, disabled }) {
     setQuery('')
     setSuggestions([])
     setError(null)
-    // 다음 틱에 포커스
     setTimeout(() => inputRef.current?.focus(), 50)
   }
 
@@ -121,7 +125,7 @@ export default function DestinationInput({ destination, onConfirm, disabled }) {
     setError(null)
   }
 
-  // ── 렌더링 ────────────────────────────────────────────────────────────────
+  // ─── 렌더링 ───────────────────────────────────────────────────────────────
   return (
     <div style={{
       position:  'fixed',
@@ -206,14 +210,14 @@ export default function DestinationInput({ destination, onConfirm, disabled }) {
               ref={inputRef}
               type="text"
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => { setQuery(e.target.value); setError(null) }}
               onKeyDown={(e) => e.key === 'Escape' && handleClose()}
-              placeholder="주소 또는 장소명 입력 (예: 노을3로)"
+              placeholder="주소 또는 장소명 입력"
               style={{
                 width:        '100%',
                 boxSizing:    'border-box',
                 background:   'rgba(255,255,255,0.07)',
-                border:       '1px solid rgba(0,127,255,0.35)',
+                border:       `1px solid ${error ? 'rgba(255,100,100,0.5)' : 'rgba(0,127,255,0.35)'}`,
                 borderRadius: '9px',
                 padding:      '10px 36px 10px 12px',
                 color:        '#ffffff',
@@ -221,7 +225,6 @@ export default function DestinationInput({ destination, onConfirm, disabled }) {
                 outline:      'none',
               }}
             />
-            {/* 로딩 인디케이터 */}
             {(fetching || selecting) && (
               <span style={{
                 position: 'absolute', right: '22px', top: '50%',
@@ -233,9 +236,14 @@ export default function DestinationInput({ destination, onConfirm, disabled }) {
             )}
           </div>
 
-          {/* 오류 */}
+          {/* 오류 메시지 */}
           {error && (
-            <div style={{ padding: '0 14px 10px', fontSize: '12px', color: '#ff6b6b' }}>
+            <div style={{
+              padding:    '0 14px 10px',
+              fontSize:   '12px',
+              color:      '#ff8080',
+              lineHeight: '1.5',
+            }}>
               ⚠ {error}
             </div>
           )}
@@ -243,32 +251,30 @@ export default function DestinationInput({ destination, onConfirm, disabled }) {
           {/* 자동완성 목록 */}
           {suggestions.length > 0 && (
             <ul style={{
-              listStyle:    'none',
-              margin:       0,
-              padding:      '0 0 8px',
-              maxHeight:    '280px',
-              overflowY:    'auto',
-              borderTop:    '1px solid rgba(0,127,255,0.12)',
+              listStyle: 'none',
+              margin:    0,
+              padding:   '0 0 8px',
+              maxHeight: '280px',
+              overflowY: 'auto',
+              borderTop: '1px solid rgba(0,127,255,0.12)',
             }}>
-              {suggestions.map((s, i) => {
-                const pred      = s.placePrediction
-                const mainText  = pred.structuredFormat?.mainText?.text  ?? pred.text?.text ?? ''
-                const subText   = pred.structuredFormat?.secondaryText?.text ?? ''
+              {suggestions.map((pred, i) => {
+                const mainText = pred.structured_formatting?.main_text  ?? pred.description
+                const subText  = pred.structured_formatting?.secondary_text ?? ''
 
                 return (
                   <li
-                    key={pred.placeId ?? i}
-                    onClick={() => !selecting && handleSelect(s)}
+                    key={pred.place_id ?? i}
+                    onClick={() => !selecting && handleSelect(pred)}
                     style={{
-                      display:    'flex',
-                      alignItems: 'flex-start',
-                      gap:        '10px',
-                      padding:    '11px 14px',
-                      cursor:     selecting ? 'default' : 'pointer',
+                      display:      'flex',
+                      alignItems:   'flex-start',
+                      gap:          '10px',
+                      padding:      '11px 14px',
+                      cursor:       selecting ? 'default' : 'pointer',
                       borderBottom: i < suggestions.length - 1
                         ? '1px solid rgba(255,255,255,0.05)'
                         : 'none',
-                      transition: 'background 0.15s',
                     }}
                     onMouseEnter={(e) =>
                       (e.currentTarget.style.background = 'rgba(0,127,255,0.12)')
@@ -277,18 +283,10 @@ export default function DestinationInput({ destination, onConfirm, disabled }) {
                       (e.currentTarget.style.background = 'transparent')
                     }
                   >
-                    {/* 위치 핀 아이콘 */}
-                    <span style={{
-                      fontSize:   '16px',
-                      marginTop:  '1px',
-                      flexShrink: 0,
-                      opacity:    0.7,
-                    }}>
+                    <span style={{ fontSize: '16px', marginTop: '1px', flexShrink: 0, opacity: 0.7 }}>
                       📍
                     </span>
-
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      {/* 장소명 (굵게) */}
                       <div style={{
                         fontSize:     '14px',
                         fontWeight:   '600',
@@ -299,7 +297,6 @@ export default function DestinationInput({ destination, onConfirm, disabled }) {
                       }}>
                         {mainText}
                       </div>
-                      {/* 부가 주소 */}
                       {subText && (
                         <div style={{
                           fontSize:     '12px',
@@ -319,8 +316,8 @@ export default function DestinationInput({ destination, onConfirm, disabled }) {
             </ul>
           )}
 
-          {/* 입력은 했지만 결과 없음 */}
-          {!fetching && query.trim() && suggestions.length === 0 && !error && (
+          {/* 결과 없음 */}
+          {!fetching && !error && query.trim() && suggestions.length === 0 && (
             <div style={{
               padding:   '14px',
               fontSize:  '13px',

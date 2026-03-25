@@ -62,7 +62,7 @@ function makeArrowGeo() {
 
 // ─── 컴포넌트 ────────────────────────────────────────────────────────────────
 export default function FloorArrows({
-  steps, currentPosition, heading, active, floorY, hitFloorYRef,
+  steps, currentPosition, heading, active, floorY, hitFloorYRef, destinationPos,
 }) {
   const { camera } = useThree()
 
@@ -86,7 +86,7 @@ export default function FloorArrows({
     [],
   )
 
-  const groupRef = useRef()
+  const groupRef  = useRef()
   const arrowRefs = useRef([])
 
   // 재사용 벡터 (GC 최소화)
@@ -99,15 +99,16 @@ export default function FloorArrows({
   useFrame(({ clock }) => {
     if (!groupRef.current) return
 
-    if (!active || !steps?.length || !currentPosition || heading === null) {
+    // GPS 위치 없거나 내비게이션 비활성이면 숨김
+    if (!active || !currentPosition) {
       groupRef.current.visible = false
       return
     }
     groupRef.current.visible = true
 
-    const t     = clock.getElapsedTime()
+    const t      = clock.getElapsedTime()
     // hit-test 감지 바닥 우선, 없으면 배치된 위치, 마지막은 카메라 기반 추정
-    const floor = hitFloorYRef?.current ?? floorY ?? (camera.position.y - 1.55)
+    const floor  = hitFloorYRef?.current ?? floorY ?? (camera.position.y - 1.55)
     const arrowY = floor + DEPTH   // 바닥 위에 화살표가 올라앉도록
 
     // ── 카메라 수평 전방 벡터 ────────────────────────────────────────────────
@@ -118,14 +119,20 @@ export default function FloorArrows({
     const fx = _fwd.current.x
     const fz = _fwd.current.z
 
+    // ── 나침반 heading 없으면 카메라 방향으로 추정 ──────────────────────────
+    // WebXR에서 world 공간은 geo 정렬: +X=East, -Z=North
+    // atan2(fx, -fz)는 North 기준 CW 각도(= bearing) 와 동일한 규칙
+    const effectiveHeading =
+      heading !== null
+        ? heading
+        : ((Math.atan2(fx, -fz) * 180) / Math.PI + 360) % 360
+
     // ── GPS → 월드 좌표 변환 ─────────────────────────────────────────────────
-    // heading 기준 relAngle 만큼 카메라 전방을 Y축 회전 (표준 Ry 행렬, CW)
     const gpsToWorld = (gps) => {
       const br   = bearing(currentPosition.lat, currentPosition.lon, gps.lat, gps.lon)
       const dist = haversineM(currentPosition.lat, currentPosition.lon, gps.lat, gps.lon)
-      const rad  = ((br - heading + 360) % 360) * (Math.PI / 180)
+      const rad  = ((br - effectiveHeading + 360) % 360) * (Math.PI / 180)
       const cosR = Math.cos(rad), sinR = Math.sin(rad)
-      // Ry(-rad): CW rotation around +Y
       const wx = cosR * fx - sinR * fz
       const wz = sinR * fx + cosR * fz
       return new THREE.Vector3(
@@ -135,18 +142,50 @@ export default function FloorArrows({
       )
     }
 
-    // ── 경유점 목록 (카메라 위치 + GPS 스텝 끝점) ───────────────────────────
+    // ── 경유점 목록 ──────────────────────────────────────────────────────────
+    // steps가 있으면 실제 경로 사용, 없으면 목적지 직선 경로로 fallback
     const pts = [
       new THREE.Vector3(camera.position.x, arrowY, camera.position.z),
     ]
-    for (let i = 0; i < Math.min(steps.length, 5); i++) {
-      const s = steps[i]
+
+    if (steps?.length) {
+      for (let i = 0; i < Math.min(steps.length, 5); i++) {
+        const s = steps[i]
+        const d = haversineM(
+          currentPosition.lat, currentPosition.lon,
+          s.endLocation.lat,   s.endLocation.lon,
+        )
+        if (d > MAX_DIST) break
+        pts.push(gpsToWorld(s.endLocation))
+      }
+    } else if (destinationPos?.lat) {
+      // Directions API 응답 전: 목적지 방향으로 직선 fallback
       const d = haversineM(
         currentPosition.lat, currentPosition.lon,
-        s.endLocation.lat,   s.endLocation.lon,
+        destinationPos.lat, destinationPos.lon,
       )
-      if (d > MAX_DIST) break
-      pts.push(gpsToWorld(s.endLocation))
+      if (d <= MAX_DIST) {
+        pts.push(gpsToWorld(destinationPos))
+      } else {
+        // 목적지가 너무 멀면 MAX_DIST m 앞까지만 표시
+        const br  = bearing(currentPosition.lat, currentPosition.lon, destinationPos.lat, destinationPos.lon)
+        const rad = ((br - effectiveHeading + 360) % 360) * (Math.PI / 180)
+        const cosR = Math.cos(rad), sinR = Math.sin(rad)
+        const wx = cosR * fx - sinR * fz
+        const wz = sinR * fx + cosR * fz
+        pts.push(new THREE.Vector3(
+          camera.position.x + wx * MAX_DIST,
+          arrowY,
+          camera.position.z + wz * MAX_DIST,
+        ))
+      }
+    } else {
+      // GPS/목적지 정보 없음: 카메라 전방 MAX_DIST m 방향으로 표시
+      pts.push(new THREE.Vector3(
+        camera.position.x + fx * MAX_DIST,
+        arrowY,
+        camera.position.z + fz * MAX_DIST,
+      ))
     }
 
     // ── 폴리라인 따라 화살표 배치 ────────────────────────────────────────────

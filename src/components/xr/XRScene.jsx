@@ -95,6 +95,7 @@ function SceneContent({
         active={navActive && !navigationData.hasArrived}
         floorY={floorY}
         hitFloorYRef={hitFloorYRef}
+        destinationPos={navigationData.destination}
       />
     </>
   )

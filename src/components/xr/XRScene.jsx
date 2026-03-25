@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useRef } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { Vector3, Quaternion } from 'three'
 import { XR, createXRStore } from '@react-three/xr'
@@ -8,7 +8,6 @@ import CalendarPanel from '../ui/CalendarPanel'
 import NotificationPanel from '../ui/NotificationPanel'
 import TaskPanel from '../ui/TaskPanel'
 import HitTestReticle from './HitTestReticle'
-import NavigationArrow from '../ar/NavigationArrow'
 import FloorArrows from '../ar/FloorArrows'
 import NavigationGuide from '../ui/NavigationGuide'
 import DestinationInput from '../ui/DestinationInput'
@@ -39,8 +38,10 @@ function SceneContent({
   navigationData,
   directionsData,
 }) {
-  const navActive = navigationData.status === 'active'
-  const floorY    = placedPosition ? placedPosition.y : undefined
+  const navActive    = navigationData.status === 'active'
+  const floorY       = placedPosition ? placedPosition.y : undefined
+  // hit-test로 감지된 최신 바닥 Y — useFrame 내에서 ref로 읽어 re-render 없이 사용
+  const hitFloorYRef = useRef(null)
 
   return (
     <>
@@ -55,6 +56,7 @@ function SceneContent({
           matrix.decompose(pos, new Quaternion(), new Vector3())
           setPlacedPosition(pos)
         }}
+        onHitTestUpdate={(y) => { hitFloorYRef.current = y }}
       />
 
       {/* 내비게이션 존 마커 */}
@@ -85,17 +87,6 @@ function SceneContent({
         </>
       )}
 
-      {/* AR 내비게이션 HUD 화살표 */}
-      {navActive && (
-        <NavigationArrow
-          relativeAngle={navigationData.relativeAngle}
-          distance={navigationData.distance}
-          heading={navigationData.heading}
-          hasArrived={navigationData.hasArrived}
-          destinationName={navigationData.destination?.name}
-        />
-      )}
-
       {/* 바닥 파란색 화살표 경로 가이드 */}
       <FloorArrows
         steps={directionsData.steps}
@@ -103,6 +94,7 @@ function SceneContent({
         heading={navigationData.heading}
         active={navActive && !navigationData.hasArrived}
         floorY={floorY}
+        hitFloorYRef={hitFloorYRef}
       />
     </>
   )
@@ -128,7 +120,6 @@ export default function XRScene() {
   const [placedPosition, setPlacedPosition] = useState(new Vector3(0, 1, -3))
   const [activeZone,     setActiveZone]     = useState(null)
   const [destination,    setDestination]    = useState(DEFAULT_DESTINATION)
-
   // 내비게이션 훅 — Canvas 밖에서 호출 (브라우저 API 사용)
   const navigationData = useNavigation(destination)
   const { status, error, startNavigation, hasArrived, position, heading } = navigationData

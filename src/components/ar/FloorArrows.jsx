@@ -62,7 +62,7 @@ function makeArrowGeo() {
 
 // ─── 컴포넌트 ────────────────────────────────────────────────────────────────
 export default function FloorArrows({
-  steps, currentPosition, heading, active, floorY,
+  steps, currentPosition, heading, active, floorY, hitFloorYRef,
 }) {
   const { camera } = useThree()
 
@@ -106,7 +106,8 @@ export default function FloorArrows({
     groupRef.current.visible = true
 
     const t     = clock.getElapsedTime()
-    const floor = floorY ?? (camera.position.y - 1.55)
+    // hit-test 감지 바닥 우선, 없으면 배치된 위치, 마지막은 카메라 기반 추정
+    const floor = hitFloorYRef?.current ?? floorY ?? (camera.position.y - 1.55)
     const arrowY = floor + DEPTH   // 바닥 위에 화살표가 올라앉도록
 
     // ── 카메라 수평 전방 벡터 ────────────────────────────────────────────────

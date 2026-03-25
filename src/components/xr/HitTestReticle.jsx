@@ -7,7 +7,7 @@ import { Matrix4, Quaternion, Vector3 } from 'three'
  * Displays a ring that follows the hit-test surface in AR mode
  * Allows users to tap to place the dashboard at that location
  */
-export default function HitTestReticle({ onPlace }) {
+export default function HitTestReticle({ onPlace, onHitTestUpdate }) {
   const reticleRef = useRef()
   const [hitMatrix, setHitMatrix] = useState(null)
 
@@ -18,7 +18,10 @@ export default function HitTestReticle({ onPlace }) {
         // Get the first hit result's world matrix
         const matrix = new Matrix4()
         getWorldMatrix(matrix, results[0])
-        setHitMatrix(matrix.elements)
+        const elements = matrix.elements
+        setHitMatrix(elements)
+        // Y translation is at index 13 in column-major matrix
+        if (onHitTestUpdate) onHitTestUpdate(elements[13])
       } else {
         setHitMatrix(null)
       }

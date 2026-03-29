@@ -1,162 +1,138 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { haversine } from '../utils/geoUtils'
 
-const REFETCH_INTERVAL_MS = 30_000  // 30초마다 경로 재조회
-const STEP_ADVANCE_M      = 15      // 스텝 끝지점 15m 이내 → 다음 스텝으로
+const STEP_ADVANCE_M = 15   // 다음 스텝 전환 거리 (m)
+const REFRESH_MS     = 30000 // 30초마다 경로 재조회
 
-// ─── 수학 유틸 ────────────────────────────────────────────────────────────────
-function haversineMeters(lat1, lon1, lat2, lon2) {
-  const R   = 6_371_000
-  const rad = (d) => (d * Math.PI) / 180
-  const dLat = rad(lat2 - lat1)
-  const dLon = rad(lon2 - lon1)
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(dLon / 2) ** 2
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-}
-
-// ─── Hook ─────────────────────────────────────────────────────────────────────
 /**
  * useDirections
  *
- * Google Routes API v2를 통해 실제 보행 경로를 가져옵니다.
+ * Google Routes API v2를 사용해 도보 경로를 조회하고 스텝을 관리한다.
+ *
+ * @param {object|null} position  { lat, lon } — useNavigation에서 전달
+ * @param {object|null} destination { lat, lon, name }
  *
  * 반환값:
- *   steps            Array<{endLocation, distanceMeters, maneuver, instructions}>
- *   loading          boolean
- *   error            string | null
- *   currentStepIndex number
- *   currentStep      step | null
- *   distanceToStep   meters | null
+ *   steps          전체 스텝 배열
+ *   currentStep    현재 안내 스텝 객체
+ *   currentStepIdx 현재 스텝 인덱스
+ *   totalSteps     전체 스텝 수
+ *   loading        boolean
+ *   error          string | null
  */
-export function useDirections({ position, active, apiKey, destination }) {
-  const [steps,            setSteps]            = useState([])
-  const [loading,          setLoading]          = useState(false)
-  const [error,            setError]            = useState(null)
-  const [currentStepIndex, setCurrentStepIndex] = useState(0)
+export function useDirections(position, destination) {
+  const [steps, setSteps]               = useState([])
+  const [currentStepIdx, setCurrentStepIdx] = useState(0)
+  const [loading, setLoading]           = useState(false)
+  const [error, setError]               = useState(null)
 
-  const positionRef = useRef(null)
-  positionRef.current = position
+  const positionRef    = useRef(position)
+  const abortCtrlRef   = useRef(null)
 
-  // ── 경로 조회 함수 ──────────────────────────────────────────────────────────
-  const fetchDirections = useCallback(async (pos) => {
-    if (!apiKey || !pos || !destination) return
-    setLoading(true)
-    try {
-      const res = await fetch(
-        'https://routes.googleapis.com/directions/v2:computeRoutes',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type':   'application/json',
-            'X-Goog-Api-Key': apiKey,
-            'X-Goog-FieldMask': [
-              'routes.legs.steps.distanceMeters',
-              'routes.legs.steps.endLocation',
-              'routes.legs.steps.navigationInstruction',
-            ].join(','),
-          },
-          body: JSON.stringify({
-            origin: {
-              location: { latLng: { latitude: pos.lat, longitude: pos.lon } },
-            },
-            destination: {
-              location: {
-                latLng: { latitude: destination.lat, longitude: destination.lon },
-              },
-            },
-            travelMode:   'WALK',
-            languageCode: 'ko',
-          }),
-        },
-      )
+  useEffect(() => { positionRef.current = position }, [position])
 
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        throw new Error(body?.error?.message ?? `Routes API ${res.status}`)
-      }
-
-      const data  = await res.json()
-      const route = data.routes?.[0]
-      if (!route) throw new Error('경로를 찾을 수 없습니다.')
-
-      const parsed = route.legs
-        .flatMap((leg) => leg.steps)
-        .map((step) => ({
-          distanceMeters: step.distanceMeters ?? 0,
-          endLocation: {
-            lat: step.endLocation.latLng.latitude,
-            lon: step.endLocation.latLng.longitude,
-          },
-          maneuver:     step.navigationInstruction?.maneuver     ?? 'STRAIGHT',
-          instructions: step.navigationInstruction?.instructions ?? '직진',
-        }))
-
-      setSteps(parsed)
-      setCurrentStepIndex(0)
-      setError(null)
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setLoading(false)
-    }
-  }, [apiKey, destination])
-
-  // ── 활성화 시 초기 조회 + 30초 재조회 ────────────────────────────────────
+  // ── 경로 조회 (destination 변경 시 즉시 + 30초 타이머) ──────────
   useEffect(() => {
-    if (!active) {
-      setSteps([])
-      setCurrentStepIndex(0)
-      setError(null)
-      return
-    }
+    if (!destination) return
+
+    const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY
     if (!apiKey) {
       setError('VITE_GOOGLE_MAPS_API_KEY가 설정되지 않았습니다.')
       return
     }
 
-    // GPS 안정화를 위해 2초 후 첫 조회
-    const initTimer = setTimeout(() => {
-      if (positionRef.current) fetchDirections(positionRef.current)
-    }, 2000)
+    let cancelled = false
 
-    // 30초마다 경로 재조회 (경로 이탈 대응)
-    const refetchTimer = setInterval(() => {
-      if (positionRef.current) fetchDirections(positionRef.current)
-    }, REFETCH_INTERVAL_MS)
+    const fetchRoute = async () => {
+      const pos = positionRef.current
+      if (!pos) return
+
+      abortCtrlRef.current?.abort()
+      const ctrl = new AbortController()
+      abortCtrlRef.current = ctrl
+
+      setLoading(true)
+      try {
+        const res = await fetch(
+          'https://routes.googleapis.com/directions/v2:computeRoutes',
+          {
+            method: 'POST',
+            signal: ctrl.signal,
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Goog-Api-Key': apiKey,
+              'X-Goog-FieldMask': [
+                'routes.legs.steps.startLocation',
+                'routes.legs.steps.endLocation',
+                'routes.legs.steps.distanceMeters',
+                'routes.legs.steps.navigationInstruction',
+              ].join(','),
+            },
+            body: JSON.stringify({
+              origin: {
+                location: { latLng: { latitude: pos.lat, longitude: pos.lon } },
+              },
+              destination: {
+                location: {
+                  latLng: {
+                    latitude:  destination.lat,
+                    longitude: destination.lon,
+                  },
+                },
+              },
+              travelMode:   'WALK',
+              languageCode: 'ko',
+            }),
+          },
+        )
+        const data = await res.json()
+        if (!cancelled) {
+          const newSteps = data?.routes?.[0]?.legs?.[0]?.steps ?? []
+          setSteps(newSteps)
+          setCurrentStepIdx(0)
+          setError(null)
+        }
+      } catch (e) {
+        if (!cancelled && e.name !== 'AbortError') {
+          setError(e.message)
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+
+    fetchRoute()
+    const timer = setInterval(fetchRoute, REFRESH_MS)
 
     return () => {
-      clearTimeout(initTimer)
-      clearInterval(refetchTimer)
+      cancelled = true
+      clearInterval(timer)
+      abortCtrlRef.current?.abort()
     }
-  }, [active, apiKey, fetchDirections])
+  }, [destination?.lat, destination?.lon]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── 현재 스텝 추적 ─────────────────────────────────────────────────────────
+  // ── 스텝 진행 판정 (다음 경유점까지 15m 이내 → 자동 전환) ───────
   useEffect(() => {
-    if (!position || !steps.length) return
-    setCurrentStepIndex((prev) => {
-      let idx = prev
-      while (idx < steps.length - 1) {
-        const { endLocation } = steps[idx]
-        const dist = haversineMeters(
-          position.lat, position.lon,
-          endLocation.lat, endLocation.lon,
-        )
-        if (dist < STEP_ADVANCE_M) idx++
-        else break
-      }
-      return idx
-    })
-  }, [position, steps])
+    if (!position || steps.length === 0) return
+    const step = steps[currentStepIdx]
+    if (!step) return
 
-  // ── 파생값 ─────────────────────────────────────────────────────────────────
-  const currentStep    = steps[currentStepIndex] ?? null
-  const distanceToStep = position && currentStep
-    ? haversineMeters(
-        position.lat, position.lon,
-        currentStep.endLocation.lat, currentStep.endLocation.lon,
-      )
-    : null
+    const endLat = step.endLocation?.latLng?.latitude
+    const endLon = step.endLocation?.latLng?.longitude
+    if (endLat == null || endLon == null) return
 
-  return { steps, loading, error, currentStepIndex, currentStep, distanceToStep }
+    const distM = haversine(position.lat, position.lon, endLat, endLon) * 1000
+    if (distM <= STEP_ADVANCE_M && currentStepIdx < steps.length - 1) {
+      setCurrentStepIdx((i) => i + 1)
+    }
+  }, [position?.lat, position?.lon, steps, currentStepIdx]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  return {
+    steps,
+    currentStep:    steps[currentStepIdx] ?? null,
+    currentStepIdx,
+    totalSteps:     steps.length,
+    loading,
+    error,
+  }
 }

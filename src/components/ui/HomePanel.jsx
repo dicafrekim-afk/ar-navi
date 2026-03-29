@@ -59,6 +59,18 @@ const CATS = [
 export default function HomePanel({ position, navigationData }) {
   const weather = useWeather()
   const [selectedCatName, setSelectedCatName] = useState(null)
+  const arrivedRef = useRef(false)
+
+  // 도착 시 고양이 랜덤 팝업 (최초 1회)
+  useEffect(() => {
+    const hasArrived = navigationData?.hasArrived ?? false
+    if (hasArrived && !arrivedRef.current) {
+      arrivedRef.current = true
+      const random = CATS[Math.floor(Math.random() * CATS.length)]
+      setSelectedCatName(random.name)
+    }
+    if (!hasArrived) arrivedRef.current = false
+  }, [navigationData?.hasArrived])
 
   // 내비게이션 거리 포맷
   const navActive  = navigationData?.status === 'active'
@@ -72,22 +84,9 @@ export default function HomePanel({ position, navigationData }) {
   const selectedCat = CATS.find((c) => c.name === selectedCatName) ?? null
 
   const handleCatSelect = (name) => {
+    // 같은 고양이 재탭 시 카드 닫기
     setSelectedCatName((prev) => (prev === name ? null : name))
   }
-
-  // 도착 시 고양이 팝업 자동 트리거 (한 번만)
-  const arrivedShownRef = useRef(false)
-  useEffect(() => {
-    if (hasArrived && !arrivedShownRef.current) {
-      arrivedShownRef.current = true
-      // 랜덤 고양이 한 마리 선택
-      const randomCat = CATS[Math.floor(Math.random() * CATS.length)]
-      setSelectedCatName(randomCat.name)
-    }
-    if (!hasArrived) {
-      arrivedShownRef.current = false
-    }
-  }, [hasArrived])
 
   // 4마리 균등 배치: x = -1.08, -0.36, +0.36, +1.08
   const catSpacing = 0.72
@@ -214,7 +213,7 @@ export default function HomePanel({ position, navigationData }) {
             />
           </mesh>
 
-          {/* 목적지명 */}
+          {/* 병원명 */}
           <Text
             position={[-0.82, 0.01, 0.02]}
             fontSize={0.115}
@@ -222,7 +221,7 @@ export default function HomePanel({ position, navigationData }) {
             anchorX="left"
             anchorY="middle"
           >
-            {navigationData?.destination?.name ?? '목적지'}
+            제일연합내과의원
           </Text>
 
           {/* 거리 / 도착 표시 */}

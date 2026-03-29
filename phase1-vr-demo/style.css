@@ -1,0 +1,38 @@
+/* A-Frame VR Demo Styling */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background-color: #000;
+  font-family: Arial, sans-serif;
+}
+
+/* A-Frame canvas fullscreen */
+a-scene {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* VR Button positioning */
+.a-vr-button {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 999;
+}
+
+/* Mobile AR button */
+.a-enter-ar {
+  position: fixed;
+  bottom: 20px;
+  left: 20px;
+  z-index: 999;
+}

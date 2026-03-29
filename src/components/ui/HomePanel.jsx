@@ -221,7 +221,7 @@ export default function HomePanel({ position, navigationData }) {
             anchorX="left"
             anchorY="middle"
           >
-            제일연합내과의원
+            {navigationData?.destination?.name ?? '목적지'}
           </Text>
 
           {/* 거리 / 도착 표시 */}

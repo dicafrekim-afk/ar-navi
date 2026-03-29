@@ -2,27 +2,38 @@ import React, { useRef, useMemo } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 
-const ARROW_COLOR   = '#1A6FFF'
-const NUM_ARROWS    = 7
-const ARROW_SPACING = 1.2   // 화살표 간격 (m)
-const ARROW_SCALE   = 0.42  // 화살표 크기 배율
+// ── 티맵 스타일 팔레트 ─────────────────────────────────────────────────────────
+const COLOR_FILL    = '#1A6FFF'
+const COLOR_EMISSIVE = '#1A6FFF'
+
+const NUM_ARROWS    = 9      // 동시에 표시할 화살표 수
+const ARROW_SPACING = 0.72   // 화살표 간격 (m) — 촘촘하게
+const ARROW_SCALE   = 1.0    // 크기 배율
 
 /**
- * ExtrudeGeometry용 화살표 모양 (위쪽 = 진행방향)
- *   ▲
- *  ◀ ▶
- *   |
- *   |
+ * 티맵 스타일 쉐브론(V자) 형태 — 위쪽이 진행방향
+ *
+ * 넓고 납작한 V 형태로 바닥에 깔려있는 느낌을 줌
+ *
+ *          ★ (0, 0.52)  ← 앞 꼭짓점
+ *         / \
+ *        /   \
+ * (−0.5, 0.0) (0.5, 0.0)  ← 좌우 날개 끝
+ *       \     /
+ *        \   /
+ *    (−0.18, −0.25) (0.18, −0.25)  ← 안쪽 노치
+ *         | |
+ *    (−0.18, −0.42) (0.18, −0.42)  ← 뒷면
  */
-function createArrowShape() {
+function createChevronShape() {
   const s = new THREE.Shape()
-  s.moveTo(0,      0.36)   // 위 꼭짓점
-  s.lineTo(0.24,   0)      // 오른쪽 날개 끝
-  s.lineTo(0.09,   0)      // 오른쪽 홈
-  s.lineTo(0.09,  -0.38)   // 오른쪽 샤프트 아래
-  s.lineTo(-0.09, -0.38)   // 왼쪽 샤프트 아래
-  s.lineTo(-0.09,  0)      // 왼쪽 홈
-  s.lineTo(-0.24,  0)      // 왼쪽 날개 끝
+  s.moveTo(0,      0.52)   // 앞 꼭짓점 (진행방향)
+  s.lineTo(0.50,   0.00)   // 오른쪽 날개 끝
+  s.lineTo(0.18,  -0.25)   // 오른쪽 안쪽 노치
+  s.lineTo(0.18,  -0.42)   // 오른쪽 뒷면
+  s.lineTo(-0.18, -0.42)   // 왼쪽 뒷면
+  s.lineTo(-0.18, -0.25)   // 왼쪽 안쪽 노치
+  s.lineTo(-0.50,  0.00)   // 왼쪽 날개 끝
   s.closePath()
   return s
 }
@@ -30,8 +41,8 @@ function createArrowShape() {
 /**
  * FloorArrows
  *
- * bearing, heading을 기반으로 XR 월드 좌표에서 카메라 앞 바닥에
- * NUM_ARROWS 개의 3D 화살표를 Wave 애니메이션과 함께 표시한다.
+ * 티맵 스타일 — 바닥에 깔린 넓은 쉐브론(V자) 화살표가
+ * 가까운 곳 → 먼 곳 순서로 물결처럼 흐르는 애니메이션.
  *
  * Props:
  *   bearing      목적지 방위각 (degrees, 0=North CW) | null
@@ -44,12 +55,15 @@ export default function FloorArrows({ bearing, heading, hitFloorYRef }) {
   const meshRefs   = useRef([])
   const matRefs    = useRef([])
 
-  // geometry: 한 번만 생성해 모든 화살표가 공유
+  // 쉐브론 geometry — 두께 0.06m, 한 번만 생성해 공유
   const geometry = useMemo(() => {
-    const shape = createArrowShape()
+    const shape = createChevronShape()
     return new THREE.ExtrudeGeometry(shape, {
-      depth:         0.08,
-      bevelEnabled:  false,
+      depth:        0.06,
+      bevelEnabled: true,
+      bevelThickness: 0.012,
+      bevelSize:    0.012,
+      bevelSegments: 2,
     })
   }, [])
 
@@ -58,37 +72,37 @@ export default function FloorArrows({ bearing, heading, hitFloorYRef }) {
 
     if (bearing === null || heading === null) return
 
-    // XR 공간에서의 방향각 (카메라 -Z가 정면)
+    // XR 공간에서의 방향각
     const xrAngle = ((bearing - heading) * Math.PI) / 180
     const sinA    = Math.sin(xrAngle)
     const cosA    = Math.cos(xrAngle)
 
-    // 바닥 Y: Hit-test 결과 우선, 없으면 카메라 아래 1.6m 추정
-    const floorY = hitFloorYRef?.current ?? (camera.position.y - 1.6)
+    // 바닥 Y: Hit-test 결과 우선, 없으면 카메라 아래 1.6m
+    const floorY  = hitFloorYRef?.current ?? (camera.position.y - 1.6)
 
     for (let i = 0; i < NUM_ARROWS; i++) {
       const mesh = meshRefs.current[i]
       const mat  = matRefs.current[i]
       if (!mesh || !mat) continue
 
-      const dist = (i + 1) * ARROW_SPACING
+      const dist = (i + 1.2) * ARROW_SPACING
       mesh.position.set(
         camera.position.x + sinA * dist,
-        floorY + 0.015,
+        floorY + 0.018,
         camera.position.z - cosA * dist,
       )
-      // 바닥에 눕히고 (+90°X), 진행방향으로 회전
       mesh.rotation.set(-Math.PI / 2, 0, -xrAngle)
       mesh.scale.setScalar(ARROW_SCALE)
 
-      // Wave 애니메이션: 가까운 곳(i=0) → 먼 곳(i=N) 순서로 흐름
-      const wave             = Math.sin(timeRef.current * 2.8 - i * 0.85)
-      mat.emissiveIntensity  = Math.max(0.15, 0.65 + wave * 0.35)
-      mat.opacity            = Math.max(0.25, 0.62 + wave * 0.28)
+      // Wave 애니메이션: 가까운 곳(i=0)에서 먼 곳(i=N)으로 흐름
+      // 각 화살표는 위상이 달라 연속적으로 이어지는 느낌
+      const phase            = timeRef.current * 3.0 - i * 0.75
+      const wave             = (Math.sin(phase) + 1) / 2  // 0 ~ 1 범위
+      mat.emissiveIntensity  = 0.4 + wave * 1.1            // 0.4 ~ 1.5
+      mat.opacity            = 0.35 + wave * 0.55          // 0.35 ~ 0.90
     }
   })
 
-  // bearing/heading 없으면 렌더 안 함
   if (bearing === null || heading === null) return null
 
   return (
@@ -98,15 +112,17 @@ export default function FloorArrows({ bearing, heading, hitFloorYRef }) {
           key={i}
           ref={(el) => { meshRefs.current[i] = el }}
           geometry={geometry}
-          position={[0, -100, 0]}  // 초기값: 화면 밖 (첫 프레임 전 깜빡임 방지)
+          position={[0, -200, 0]}
         >
           <meshStandardMaterial
             ref={(el) => { matRefs.current[i] = el }}
-            color={ARROW_COLOR}
-            emissive={ARROW_COLOR}
-            emissiveIntensity={0.65}
+            color={COLOR_FILL}
+            emissive={COLOR_EMISSIVE}
+            emissiveIntensity={0.8}
+            metalness={0.1}
+            roughness={0.3}
             transparent
-            opacity={0.75}
+            opacity={0.8}
             side={THREE.DoubleSide}
             depthWrite={false}
           />
